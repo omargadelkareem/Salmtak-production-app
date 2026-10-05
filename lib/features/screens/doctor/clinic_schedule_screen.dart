@@ -24,6 +24,7 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
   late final List<_DaySchedule> _days;
   bool _loading = true;
   bool _saving = false;
+  String? _loadError;
 
   @override
   void initState() {
@@ -47,9 +48,26 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
       .child('${widget.clinicIndex}')
       .child('schedule');
 
+  void _resetDays() {
+    for (final day in _days) {
+      day.enabled = false;
+      day.from = null;
+      day.to = null;
+    }
+  }
+
   Future<void> _loadSchedule() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
+
     try {
       final snap = await _scheduleRef.get().timeout(const Duration(seconds: 8));
+      _resetDays();
+
       if (snap.exists && snap.value is Map) {
         final map = Map<dynamic, dynamic>.from(snap.value as Map);
         for (final day in _days) {
@@ -67,6 +85,7 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
       }
     } catch (e) {
       debugPrint('Clinic schedule load error: $e');
+      _loadError = 'تعذر تحميل مواعيد العيادة. لن يتم السماح بالحفظ حتى نحمّل المواعيد الحالية لحمايتها من المسح.';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -76,9 +95,13 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
     var text = input
         .trim()
         .replaceAll('صباحًا', 'ص')
+        .replaceAll('صباحا', 'ص')
         .replaceAll('مساءً', 'م')
+        .replaceAll('مساءا', 'م')
         .replaceAll('AM', 'ص')
-        .replaceAll('PM', 'م');
+        .replaceAll('PM', 'م')
+        .replaceAll('am', 'ص')
+        .replaceAll('pm', 'م');
     final pm = text.contains('م');
     final am = text.contains('ص');
     text = text.replaceAll('م', '').replaceAll('ص', '').trim();
@@ -104,20 +127,28 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
   bool get _valid {
     final enabled = _days.where((d) => d.enabled).toList();
     if (enabled.isEmpty) return false;
-    return enabled.every((d) => d.from != null && d.to != null && _minutes(d.to!) > _minutes(d.from!));
+    return enabled.every((d) =>
+        d.from != null &&
+        d.to != null &&
+        _minutes(d.to!) > _minutes(d.from!));
   }
 
   Future<void> _pickTime(_DaySchedule day, {required bool from}) async {
     final initial = from ? day.from : day.to;
     final picked = await showTimePicker(
       context: context,
-      initialTime: initial ?? (from ? const TimeOfDay(hour: 9, minute: 0) : const TimeOfDay(hour: 17, minute: 0)),
+      initialTime: initial ??
+          (from
+              ? const TimeOfDay(hour: 9, minute: 0)
+              : const TimeOfDay(hour: 17, minute: 0)),
     );
     if (picked == null || !mounted) return;
     setState(() {
       if (from) {
         day.from = picked;
-        if (day.to != null && _minutes(day.to!) <= _minutes(picked)) day.to = null;
+        if (day.to != null && _minutes(day.to!) <= _minutes(picked)) {
+          day.to = null;
+        }
       } else {
         day.to = picked;
       }
@@ -125,19 +156,35 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
   }
 
   Future<void> _save() async {
-    if (!_valid) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('فعّل يومًا واحدًا على الأقل وحدد وقت بداية ونهاية صحيح.')));
+    if (_loadError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('حمّل المواعيد الحالية أولاً قبل الحفظ.')),
+      );
       return;
     }
+    if (!_valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('فعّل يومًا واحدًا على الأقل وحدد وقت بداية ونهاية صحيح.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       final data = <String, dynamic>{};
       for (final day in _days) {
         if (!day.enabled) continue;
-        data[day.key] = {'from': _format(day.from!), 'to': _format(day.to!)};
+        data[day.key] = {
+          'from': _format(day.from!),
+          'to': _format(day.to!),
+        };
       }
-      await _scheduleRef.set(data);
+
+      await _scheduleRef.set(data).timeout(const Duration(seconds: 10));
       if (!mounted) return;
+
       if (widget.clinicIndex + 1 < widget.clinicsCount) {
         Navigator.pushReplacement(
           context,
@@ -151,11 +198,18 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ مواعيد العيادة بنجاح')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ مواعيد العيادة بنجاح')),
+        );
         Navigator.pop(context);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر حفظ المواعيد. حاول مرة أخرى.')));
+      debugPrint('Clinic schedule save error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حفظ المواعيد. حاول مرة أخرى.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -167,72 +221,201 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F9),
       appBar: AppBar(
-        title: Text('مواعيد العيادة ${widget.clinicIndex + 1}', style: const TextStyle(fontWeight: FontWeight.w900)),
+        title: Text(
+          'مواعيد العيادة ${widget.clinicIndex + 1}',
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
         backgroundColor: color,
         foregroundColor: Colors.white,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: color.withOpacity(.08), borderRadius: BorderRadius.circular(14)),
-                    child: const Text('فعّل أيام العمل وحدد بداية ونهاية الدوام. المواعيد المتاحة للمريض تُنشأ كل 30 دقيقة.', style: TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _days.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, i) {
-                      final day = _days[i];
-                      final invalid = day.enabled && day.from != null && day.to != null && _minutes(day.to!) <= _minutes(day.from!);
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: day.enabled ? color.withOpacity(.45) : const Color(0xFFE5E7EB))),
-                        child: Column(
-                          children: [
-                            Row(children: [
-                              Expanded(child: Text(day.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900))),
-                              Switch(value: day.enabled, activeColor: color, onChanged: (v) => setState(() { day.enabled = v; if (!v) { day.from = null; day.to = null; } })),
-                            ]),
-                            if (day.enabled) ...[
-                              const SizedBox(height: 10),
-                              Row(children: [
-                                Expanded(child: _TimeButton(label: 'من', value: day.from == null ? 'اختر' : _format(day.from!), color: color, onTap: () => _pickTime(day, from: true))),
-                                const SizedBox(width: 10),
-                                Expanded(child: _TimeButton(label: 'إلى', value: day.to == null ? 'اختر' : _format(day.to!), color: color, onTap: () => _pickTime(day, from: false))),
-                              ]),
-                              if (invalid) const Padding(padding: EdgeInsets.only(top: 8), child: Align(alignment: Alignment.centerRight, child: Text('وقت النهاية يجب أن يكون بعد وقت البداية', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w700)))),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                SafeArea(
-                  top: false,
+          : _loadError != null
+              ? Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _saving ? null : _save,
-                        style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                        child: _saving ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(widget.clinicIndex + 1 < widget.clinicsCount ? 'حفظ والانتقال للعيادة التالية' : 'حفظ المواعيد', style: const TextStyle(fontWeight: FontWeight.w900)),
-                      ),
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cloud_off_rounded,
+                            size: 52, color: Colors.grey.shade500),
+                        const SizedBox(height: 14),
+                        Text(
+                          _loadError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            height: 1.6,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: _loadSchedule,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('إعادة المحاولة'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: color,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                )
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(.08),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Text(
+                          'فعّل أيام العمل وحدد بداية ونهاية الدوام. المواعيد المتاحة للمريض تُنشأ كل 30 دقيقة.',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _days.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final day = _days[i];
+                          final invalid = day.enabled &&
+                              day.from != null &&
+                              day.to != null &&
+                              _minutes(day.to!) <= _minutes(day.from!);
+                          return Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: day.enabled
+                                    ? color.withOpacity(.45)
+                                    : const Color(0xFFE5E7EB),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        day.title,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                    Switch(
+                                      value: day.enabled,
+                                      activeColor: color,
+                                      onChanged: (v) => setState(() {
+                                        day.enabled = v;
+                                        if (!v) {
+                                          day.from = null;
+                                          day.to = null;
+                                        }
+                                      }),
+                                    ),
+                                  ],
+                                ),
+                                if (day.enabled) ...[
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _TimeButton(
+                                          label: 'من',
+                                          value: day.from == null
+                                              ? 'اختر'
+                                              : _format(day.from!),
+                                          color: color,
+                                          onTap: () =>
+                                              _pickTime(day, from: true),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: _TimeButton(
+                                          label: 'إلى',
+                                          value: day.to == null
+                                              ? 'اختر'
+                                              : _format(day.to!),
+                                          color: color,
+                                          onTap: () =>
+                                              _pickTime(day, from: false),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (invalid)
+                                    const Padding(
+                                      padding: EdgeInsets.only(top: 8),
+                                      child: Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          'وقت النهاية يجب أن يكون بعد وقت البداية',
+                                          style: TextStyle(
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _saving ? null : _save,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: _saving
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    widget.clinicIndex + 1 < widget.clinicsCount
+                                        ? 'حفظ والانتقال للعيادة التالية'
+                                        : 'حفظ المواعيد',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
     );
   }
 }
@@ -243,6 +426,7 @@ class _DaySchedule {
   bool enabled = false;
   TimeOfDay? from;
   TimeOfDay? to;
+
   _DaySchedule(this.title, this.key);
 }
 
@@ -251,14 +435,38 @@ class _TimeButton extends StatelessWidget {
   final String value;
   final Color color;
   final VoidCallback onTap;
-  const _TimeButton({required this.label, required this.value, required this.color, required this.onTap});
+
+  const _TimeButton({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return OutlinedButton(
       onPressed: onTap,
-      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), side: BorderSide(color: color.withOpacity(.35)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-      child: Column(children: [Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)), const SizedBox(height: 3), Text(value, style: TextStyle(color: color, fontWeight: FontWeight.w900))]),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        side: BorderSide(color: color.withOpacity(.35)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
     );
   }
 }
