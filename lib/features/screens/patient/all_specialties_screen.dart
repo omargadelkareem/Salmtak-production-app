@@ -16,129 +16,53 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
 
   final DatabaseReference _usersRef =
       FirebaseDatabase.instance.ref().child('users');
+  final TextEditingController _searchController = TextEditingController();
+
+  String _searchQuery = '';
+  Map<String, int> doctorCounts = <String, int>{};
 
   final List<Map<String, dynamic>> allSpecialties = [
     {'title': 'أسنان', 'icon': Icons.sentiment_satisfied, 'value': 'أسنان'},
     {'title': 'جلدية وتناسلية', 'icon': Icons.face, 'value': 'جلدية وتناسلية'},
-    {
-      'title': 'قلب وأوعية دموية',
-      'icon': Icons.favorite,
-      'value': 'قلب وأوعية دموية'
-    },
+    {'title': 'قلب وأوعية دموية', 'icon': Icons.favorite, 'value': 'قلب وأوعية دموية'},
     {'title': 'عظام', 'icon': Icons.healing, 'value': 'عظام'},
-    {
-      'title': 'أطفال وحديثي الولادة',
-      'icon': Icons.child_friendly,
-      'value': 'أطفال وحديثي الولادة'
-    },
-    {
-      'title': 'نساء وتوليد',
-      'icon': Icons.pregnant_woman,
-      'value': 'نساء وتوليد'
-    },
+    {'title': 'أطفال وحديثي الولادة', 'icon': Icons.child_friendly, 'value': 'أطفال وحديثي الولادة'},
+    {'title': 'نساء وتوليد', 'icon': Icons.pregnant_woman, 'value': 'نساء وتوليد'},
     {'title': 'عيون', 'icon': Icons.visibility, 'value': 'عيون'},
-    {
-      'title': 'أنف وأذن وحنجرة',
-      'icon': Icons.hearing,
-      'value': 'أنف وأذن وحنجرة'
-    },
+    {'title': 'أنف وأذن وحنجرة', 'icon': Icons.hearing, 'value': 'أنف وأذن وحنجرة'},
     {'title': 'مخ وأعصاب', 'icon': Icons.psychology, 'value': 'مخ وأعصاب'},
-    {
-      'title': 'جراحة عامة',
-      'icon': Icons.local_hospital,
-      'value': 'جراحة عامة'
-    },
+    {'title': 'جراحة عامة', 'icon': Icons.local_hospital, 'value': 'جراحة عامة'},
     {'title': 'تغذيه', 'icon': Icons.fastfood, 'value': 'تغذيه'},
-    {
-      'title': 'الأشعة التداخلية',
-      'icon': Icons.medical_services,
-      'value': 'الأشعة التداخلية'
-    },
+    {'title': 'الأشعة التداخلية', 'icon': Icons.medical_services, 'value': 'الأشعة التداخلية'},
     {'title': 'الرئة', 'icon': Icons.air, 'value': 'الرئة'},
     {'title': 'أورام', 'icon': Icons.coronavirus, 'value': 'أورام'},
-    {
-      'title': 'أورام الثدي',
-      'icon': Icons.favorite_border,
-      'value': 'أورام الثدي'
-    },
+    {'title': 'أورام الثدي', 'icon': Icons.favorite_border, 'value': 'أورام الثدي'},
     {'title': 'أمراض دم', 'icon': Icons.bloodtype, 'value': 'أمراض دم'},
-    {
-      'title': 'جهاز هضمي ومناظير',
-      'icon': Icons.food_bank,
-      'value': 'جهاز هضمي ومناظير'
-    },
+    {'title': 'جهاز هضمي ومناظير', 'icon': Icons.food_bank, 'value': 'جهاز هضمي ومناظير'},
     {'title': 'جراحة أطفال', 'icon': Icons.child_care, 'value': 'جراحة أطفال'},
     {'title': 'جراحة أورام', 'icon': Icons.coronavirus, 'value': 'جراحة أورام'},
-    {
-      'title': 'جراحة أوعية دموية',
-      'icon': Icons.bloodtype,
-      'value': 'جراحة أوعية دموية'
-    },
-    {
-      'title': 'جراحة تجميل',
-      'icon': Icons.face_retouching_natural,
-      'value': 'جراحة تجميل'
-    },
-    {
-      'title': 'جراحة سمنة ومناظير',
-      'icon': Icons.monitor_weight,
-      'value': 'جراحة سمنة ومناظير'
-    },
-    {
-      'title': 'جراحة عمود فقري',
-      'icon': Icons.accessibility_new,
-      'value': 'جراحة عمود فقري'
-    },
-    {
-      'title': 'جراحة قلب وصدر',
-      'icon': Icons.favorite,
-      'value': 'جراحة قلب وصدر'
-    },
-    {
-      'title': 'جراحة مخ وأعصاب',
-      'icon': Icons.psychology,
-      'value': 'جراحة مخ وأعصاب'
-    },
-    {
-      'title': 'جراحة الوجه والفكين',
-      'icon': Icons.face,
-      'value': 'جراحة الوجه والفكين'
-    },
+    {'title': 'جراحة أوعية دموية', 'icon': Icons.bloodtype, 'value': 'جراحة أوعية دموية'},
+    {'title': 'جراحة تجميل', 'icon': Icons.face_retouching_natural, 'value': 'جراحة تجميل'},
+    {'title': 'جراحة سمنة ومناظير', 'icon': Icons.monitor_weight, 'value': 'جراحة سمنة ومناظير'},
+    {'title': 'جراحة عمود فقري', 'icon': Icons.accessibility_new, 'value': 'جراحة عمود فقري'},
+    {'title': 'جراحة قلب وصدر', 'icon': Icons.favorite, 'value': 'جراحة قلب وصدر'},
+    {'title': 'جراحة مخ وأعصاب', 'icon': Icons.psychology, 'value': 'جراحة مخ وأعصاب'},
+    {'title': 'جراحة الوجه والفكين', 'icon': Icons.face, 'value': 'جراحة الوجه والفكين'},
     {'title': 'حساسية ومناعة', 'icon': Icons.shield, 'value': 'حساسية ومناعة'},
-    {
-      'title': 'حقن مجهري وأطفال أنابيب',
-      'icon': Icons.biotech,
-      'value': 'حقن مجهري وأطفال أنابيب'
-    },
+    {'title': 'حقن مجهري وأطفال أنابيب', 'icon': Icons.biotech, 'value': 'حقن مجهري وأطفال أنابيب'},
     {'title': 'ذكورة وعقم', 'icon': Icons.male, 'value': 'ذكورة وعقم'},
     {'title': 'سكّر وغدد صماء', 'icon': Icons.cake, 'value': 'سكّر وغدد صماء'},
     {'title': 'سمعيات', 'icon': Icons.hearing, 'value': 'سمعيات'},
     {'title': 'صدر وجهاز تنفسي', 'icon': Icons.air, 'value': 'صدر وجهاز تنفسي'},
     {'title': 'علاج الإدمان', 'icon': Icons.no_drinks, 'value': 'علاج الإدمان'},
-    {
-      'title': 'علاج الآلام',
-      'icon': Icons.sentiment_very_dissatisfied,
-      'value': 'علاج الآلام'
-    },
+    {'title': 'علاج الآلام', 'icon': Icons.sentiment_very_dissatisfied, 'value': 'علاج الآلام'},
     {'title': 'علاج بالأكسجين', 'icon': Icons.air, 'value': 'علاج بالأكسجين'},
     {'title': 'طب الأسرة', 'icon': Icons.family_restroom, 'value': 'طب الأسرة'},
-    {
-      'title': 'طب العام والحساسية',
-      'icon': Icons.local_hospital,
-      'value': 'طب العام والحساسية'
-    },
+    {'title': 'طب العام والحساسية', 'icon': Icons.local_hospital, 'value': 'طب العام والحساسية'},
     {'title': 'طب المسنين', 'icon': Icons.elderly, 'value': 'طب المسنين'},
     {'title': 'طب النفسى', 'icon': Icons.psychology, 'value': 'طب النفسى'},
-    {
-      'title': 'طب نفسى الأطفال',
-      'icon': Icons.child_care,
-      'value': 'طب نفسى الأطفال'
-    },
-    {
-      'title': 'طب التجديدي',
-      'icon': Icons.auto_awesome,
-      'value': 'طب التجديدي'
-    },
+    {'title': 'طب نفسى الأطفال', 'icon': Icons.child_care, 'value': 'طب نفسى الأطفال'},
+    {'title': 'طب التجديدي', 'icon': Icons.auto_awesome, 'value': 'طب التجديدي'},
     {'title': 'طب تقويمي', 'icon': Icons.straighten, 'value': 'طب تقويمي'},
     {'title': 'طب النووى', 'icon': Icons.science, 'value': 'طب النووى'},
     {'title': 'كبد', 'icon': Icons.healing, 'value': 'كبد'},
@@ -146,69 +70,20 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
     {'title': 'مراكز أشعة', 'icon': Icons.scanner, 'value': 'مراكز أشعة'},
     {'title': 'مسالك بولية', 'icon': Icons.water_drop, 'value': 'مسالك بولية'},
     {'title': 'معامل تحاليل', 'icon': Icons.biotech, 'value': 'معامل تحاليل'},
-    {
-      'title': 'ممارسة عامة',
-      'icon': Icons.local_hospital,
-      'value': 'ممارسة عامة'
-    },
-    {
-      'title': 'نطق وتخاطب',
-      'icon': Icons.record_voice_over,
-      'value': 'نطق وتخاطب'
-    },
+    {'title': 'ممارسة عامة', 'icon': Icons.local_hospital, 'value': 'ممارسة عامة'},
+    {'title': 'نطق وتخاطب', 'icon': Icons.record_voice_over, 'value': 'نطق وتخاطب'},
   ];
-
-  Map<String, int> doctorCounts = <String, int>{};
-
-  String? selectedGovernorate;
-  String? selectedCenter;
-
-  final Map<String, List<String>> centersByGovernorate = const {
-    'سوهاج': [
-      'سوهاج',
-      'أخميم',
-      'جرجا',
-      'طما',
-      'طهطا',
-      'المنشأة',
-      'دار السلام',
-      'جهينة',
-      'ساقلته',
-      'المراغة',
-      'البلينا',
-    ],
-    'أسيوط': [
-      'أسيوط',
-      'ديروط',
-      'القوصية',
-      'منفلوط',
-      'أبنوب',
-      'الفتح',
-      'أبو تيج',
-      'صدفا',
-      'الغنايم',
-      'ساحل سليم',
-      'البداري',
-    ],
-    'المنيا': [
-      'المنيا',
-      'ملوي',
-      'بني مزار',
-      'مطاي',
-      'سمالوط',
-      'العدوة',
-      'مغاغة',
-      'أبو قرقاص',
-      'دير مواس',
-    ],
-  };
 
   @override
   void initState() {
     super.initState();
-
-    // الصفحة تظهر فوراً ولا تنتظر Firebase.
     _loadDoctorCountsInBackground();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   String _normalize(String value) {
@@ -226,52 +101,15 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
         .replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  List<Map<String, dynamic>> _extractClinics(dynamic raw) {
-    final result = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> get _visibleSpecialties {
+    final query = _normalize(_searchQuery);
+    if (query.isEmpty) return allSpecialties;
 
-    if (raw is List) {
-      for (final value in raw) {
-        if (value is Map) result.add(Map<String, dynamic>.from(value));
-      }
-    } else if (raw is Map) {
-      for (final value in raw.values) {
-        if (value is Map) result.add(Map<String, dynamic>.from(value));
-      }
-    }
-
-    return result;
-  }
-
-  bool _matchesLocation(Map<dynamic, dynamic> doctor) {
-    if (selectedGovernorate == null && selectedCenter == null) return true;
-
-    final clinics = _extractClinics(doctor['clinics']);
-    final directGovernorate = (doctor['governorate'] ?? '').toString();
-    final directCenter = (doctor['center'] ?? '').toString();
-
-    final locations = <Map<String, String>>[
-      {
-        'governorate': directGovernorate,
-        'center': directCenter,
-      },
-      ...clinics.map(
-        (clinic) => {
-          'governorate': (clinic['governorate'] ?? '').toString(),
-          'center': (clinic['center'] ?? '').toString(),
-        },
-      ),
-    ];
-
-    return locations.any((location) {
-      final governorateOk = selectedGovernorate == null ||
-          _normalize(location['governorate'] ?? '') ==
-              _normalize(selectedGovernorate!);
-
-      final centerOk = selectedCenter == null ||
-          _normalize(location['center'] ?? '') == _normalize(selectedCenter!);
-
-      return governorateOk && centerOk;
-    });
+    return allSpecialties.where((specialty) {
+      final title = _normalize((specialty['title'] ?? '').toString());
+      final value = _normalize((specialty['value'] ?? '').toString());
+      return title.contains(query) || value.contains(query);
+    }).toList();
   }
 
   Future<void> _loadDoctorCountsInBackground() async {
@@ -289,14 +127,11 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
 
       for (final value in data.values) {
         if (value is! Map) continue;
-
         final doctor = Map<dynamic, dynamic>.from(value);
         if (doctor['isApproved'] != true) continue;
-        if (!_matchesLocation(doctor)) continue;
 
         final specialization =
             _normalize((doctor['specialization'] ?? '').toString());
-
         if (specialization.isEmpty) continue;
         counts[specialization] = (counts[specialization] ?? 0) + 1;
       }
@@ -315,7 +150,6 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
 
   int _countForSpecialty(String value) {
     final normalizedValue = _normalize(value);
-
     int count = 0;
     for (final entry in doctorCounts.entries) {
       if (entry.key == normalizedValue ||
@@ -339,11 +173,15 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
     );
   }
 
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() => _searchQuery = '');
+    FocusScope.of(context).unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final centers = selectedGovernorate == null
-        ? const <String>[]
-        : centersByGovernorate[selectedGovernorate] ?? const <String>[];
+    final visibleSpecialties = _visibleSpecialties;
 
     return Scaffold(
       backgroundColor: _background,
@@ -360,6 +198,7 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
       body: RefreshIndicator(
         onRefresh: _refreshCounts,
         child: CustomScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
@@ -377,48 +216,102 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
                         color: Color(0xFF111827),
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    if (selectedGovernorate != null) ...[
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              selectedGovernorate = null;
-                              selectedCenter = null;
-                            });
-                            _refreshCounts();
-                          },
-                          icon: const Icon(Icons.restart_alt_rounded),
-                          label: const Text('مسح الفلاتر'),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _searchController,
+                      onChanged: (value) => setState(() => _searchQuery = value),
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        hintText: 'ابحث عن تخصص... مثال: اسنان، اطفال، قلب',
+                        prefixIcon: const Icon(Icons.search_rounded, color: _primary),
+                        suffixIcon: _searchQuery.trim().isEmpty
+                            ? null
+                            : IconButton(
+                                onPressed: _clearSearch,
+                                icon: const Icon(Icons.close_rounded),
+                              ),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _primary, width: 1.4),
                         ),
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
-              sliver: SliverList.separated(
-                itemCount: allSpecialties.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final specialty = allSpecialties[index];
-                  final value = (specialty['value'] ?? '').toString();
-                  final count = _countForSpecialty(value);
-
-                  return _SpecialtyListTile(
-                    title: (specialty['title'] ?? '').toString(),
-                    icon: specialty['icon'] as IconData,
-                    doctorCount: count,
-                    onTap: () => _openSpecialty(specialty),
-                  );
-                },
+            if (visibleSpecialties.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.search_off_rounded,
+                          size: 58,
+                          color: Color(0xFF94A3B8),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'لم نجد هذا التخصص',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF111827),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'جرّب كتابة اسم آخر أو امسح البحث',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: _clearSearch,
+                          icon: const Icon(Icons.restart_alt_rounded),
+                          label: const Text('مسح البحث'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+                sliver: SliverList.separated(
+                  itemCount: visibleSpecialties.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final specialty = visibleSpecialties[index];
+                    final value = (specialty['value'] ?? '').toString();
+                    return _SpecialtyListTile(
+                      title: (specialty['title'] ?? '').toString(),
+                      icon: specialty['icon'] as IconData,
+                      doctorCount: _countForSpecialty(value),
+                      onTap: () => _openSpecialty(specialty),
+                    );
+                  },
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -426,80 +319,18 @@ class _AllSpecialtiesScreenState extends State<AllSpecialtiesScreen> {
   }
 }
 
-class _FilterDropdown extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final String? value;
-  final List<String> items;
-  final bool enabled;
-  final ValueChanged<String?> onChanged;
-
-  const _FilterDropdown({
-    required this.label,
-    required this.icon,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-    this.enabled = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: enabled ? const Color(0xFFF9FAFB) : const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: items.contains(value) ? value : null,
-          isExpanded: true,
-          hint: Text(
-            enabled ? 'اختار $label' : 'اختر المحافظة أولاً',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded),
-          onChanged: enabled ? onChanged : null,
-          items: items
-              .map(
-                (item) => DropdownMenuItem<String>(
-                  value: item,
-                  child: Row(
-                    children: [
-                      Icon(icon,
-                          size: 20, color: _AllSpecialtiesScreenState._primary),
-                      const SizedBox(width: 10),
-                      Text(item,
-                          style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-              )
-              .toList(),
-        ),
-      ),
-    );
-  }
-}
-
 class _SpecialtyListTile extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final int doctorCount;
-  final VoidCallback onTap;
-
   const _SpecialtyListTile({
     required this.title,
     required this.icon,
     required this.doctorCount,
     required this.onTap,
   });
+
+  final String title;
+  final IconData icon;
+  final int doctorCount;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
