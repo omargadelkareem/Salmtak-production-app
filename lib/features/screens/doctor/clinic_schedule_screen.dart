@@ -3,13 +3,8 @@ import 'package:flutter/material.dart';
 
 class ClinicScheduleScreen extends StatefulWidget {
   final String doctorId;
-
-  /// ✅ 0 = العيادة الأولى / 1 = العيادة الثانية
   final int clinicIndex;
-
-  /// ✅ عدد العيادات (1 أو 2)
   final int clinicsCount;
-
   final Color primaryColor;
 
   const ClinicScheduleScreen({
@@ -25,15 +20,15 @@ class ClinicScheduleScreen extends StatefulWidget {
 }
 
 class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
-  final DatabaseReference _dbRef = FirebaseDatabase.instance.ref();
-  bool _saving = false;
-
+  final DatabaseReference _db = FirebaseDatabase.instance.ref();
   late final List<_DaySchedule> _days;
+  bool _loading = true;
+  bool _saving = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-
     _days = [
       _DaySchedule('السبت', 'sat'),
       _DaySchedule('الأحد', 'sun'),
@@ -43,95 +38,154 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
       _DaySchedule('الخميس', 'thu'),
       _DaySchedule('الجمعة', 'fri'),
     ];
+    _loadSchedule();
   }
 
-  String get _clinicTitle => widget.clinicIndex == 0
-      ? 'مواعيد العيادة الأولى'
-      : 'مواعيد العيادة الثانية';
+  DatabaseReference get _scheduleRef => _db
+      .child('users')
+      .child(widget.doctorId)
+      .child('clinics')
+      .child('${widget.clinicIndex}')
+      .child('schedule');
 
-  // ==========================
-  // ✅ Helpers
-  // ==========================
-  TimeOfDay? _toTimeOfDay(int? h12, int? m, DayPeriod? p) {
-    if (h12 == null || m == null || p == null) return null;
-
-    int hour = h12 % 12; // 12 -> 0
-    if (p == DayPeriod.pm) hour += 12;
-
-    return TimeOfDay(hour: hour, minute: m);
+  void _resetDays() {
+    for (final day in _days) {
+      day.enabled = false;
+      day.from = null;
+      day.to = null;
+    }
   }
 
-  int _toMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
-
-  String _formatTimeArabic(TimeOfDay t) {
-    final hour12 = (t.hourOfPeriod == 0) ? 12 : t.hourOfPeriod;
-    final h = hour12.toString().padLeft(2, '0');
-    final m = t.minute.toString().padLeft(2, '0');
-    final period = t.period == DayPeriod.am ? 'ص' : 'م';
-    return '$h:$m $period';
-  }
-
-  bool _validSchedule() {
-    final enabledDays = _days.where((d) => d.enabled).toList();
-    if (enabledDays.isEmpty) return false;
-
-    for (final d in enabledDays) {
-      final from = _toTimeOfDay(d.fromHour, d.fromMinute, d.fromPeriod);
-      final to = _toTimeOfDay(d.toHour, d.toMinute, d.toPeriod);
-
-      if (from == null || to == null) return false;
-      if (_toMinutes(to) <= _toMinutes(from)) return false;
+  Future<void> _loadSchedule() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
     }
 
-    return true;
+    try {
+      final snap = await _scheduleRef.get().timeout(const Duration(seconds: 8));
+      _resetDays();
+
+      if (snap.exists && snap.value is Map) {
+        final map = Map<dynamic, dynamic>.from(snap.value as Map);
+        for (final day in _days) {
+          final raw = map[day.key];
+          if (raw is! Map) continue;
+          final value = Map<dynamic, dynamic>.from(raw);
+          final from = _parseTime((value['from'] ?? '').toString());
+          final to = _parseTime((value['to'] ?? '').toString());
+          if (from != null && to != null && _minutes(to) > _minutes(from)) {
+            day.enabled = true;
+            day.from = from;
+            day.to = to;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Clinic schedule load error: $e');
+      _loadError = 'تعذر تحميل مواعيد العيادة. لن يتم السماح بالحفظ حتى نحمّل المواعيد الحالية لحمايتها من المسح.';
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
-  void _toast(String msg, {bool error = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: error ? Colors.redAccent : Colors.black87,
-      ),
+  TimeOfDay? _parseTime(String input) {
+    var text = input
+        .trim()
+        .replaceAll('صباحًا', 'ص')
+        .replaceAll('صباحا', 'ص')
+        .replaceAll('مساءً', 'م')
+        .replaceAll('مساءا', 'م')
+        .replaceAll('AM', 'ص')
+        .replaceAll('PM', 'م')
+        .replaceAll('am', 'ص')
+        .replaceAll('pm', 'م');
+    final pm = text.contains('م');
+    final am = text.contains('ص');
+    text = text.replaceAll('م', '').replaceAll('ص', '').trim();
+    final parts = text.split(':');
+    final h0 = int.tryParse(parts.first.trim());
+    final m = parts.length > 1 ? int.tryParse(parts[1].trim()) : 0;
+    if (h0 == null || m == null || m < 0 || m > 59) return null;
+    var h = h0;
+    if (pm && h < 12) h += 12;
+    if (am && h == 12) h = 0;
+    if (h < 0 || h > 23) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  int _minutes(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  String _format(TimeOfDay t) {
+    final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final p = t.period == DayPeriod.am ? 'ص' : 'م';
+    return '${h.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')} $p';
+  }
+
+  bool get _valid {
+    final enabled = _days.where((d) => d.enabled).toList();
+    if (enabled.isEmpty) return false;
+    return enabled.every((d) =>
+        d.from != null &&
+        d.to != null &&
+        _minutes(d.to!) > _minutes(d.from!));
+  }
+
+  Future<void> _pickTime(_DaySchedule day, {required bool from}) async {
+    final initial = from ? day.from : day.to;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial ??
+          (from
+              ? const TimeOfDay(hour: 9, minute: 0)
+              : const TimeOfDay(hour: 17, minute: 0)),
     );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (from) {
+        day.from = picked;
+        if (day.to != null && _minutes(day.to!) <= _minutes(picked)) {
+          day.to = null;
+        }
+      } else {
+        day.to = picked;
+      }
+    });
   }
 
-  Future<void> _saveSchedule() async {
-    if (!_validSchedule()) {
-      _toast(
-        'من فضلك فعّل يوم واحد على الأقل واختر وقت صحيح (من < إلى)',
-        error: true,
+  Future<void> _save() async {
+    if (_loadError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('حمّل المواعيد الحالية أولاً قبل الحفظ.')),
+      );
+      return;
+    }
+    if (!_valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('فعّل يومًا واحدًا على الأقل وحدد وقت بداية ونهاية صحيح.'),
+        ),
       );
       return;
     }
 
     setState(() => _saving = true);
-
     try {
-      final Map<String, dynamic> scheduleMap = {};
-
-      for (final d in _days) {
-        if (!d.enabled) continue;
-
-        final from = _toTimeOfDay(d.fromHour, d.fromMinute, d.fromPeriod)!;
-        final to = _toTimeOfDay(d.toHour, d.toMinute, d.toPeriod)!;
-
-        scheduleMap[d.key] = {
-          'from': _formatTimeArabic(from),
-          'to': _formatTimeArabic(to),
+      final data = <String, dynamic>{};
+      for (final day in _days) {
+        if (!day.enabled) continue;
+        data[day.key] = {
+          'from': _format(day.from!),
+          'to': _format(day.to!),
         };
       }
 
-      await _dbRef
-          .child('users')
-          .child(widget.doctorId)
-          .child('clinics')
-          .child('${widget.clinicIndex}')
-          .child('schedule')
-          .set(scheduleMap);
+      await _scheduleRef.set(data).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
 
-      // ✅ لو في عيادة ثانية -> ينقله ليها بعد حفظ الأولى
       if (widget.clinicIndex + 1 < widget.clinicsCount) {
-        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -144,255 +198,224 @@ class _ClinicScheduleScreenState extends State<ClinicScheduleScreen> {
           ),
         );
       } else {
-        if (!mounted) return;
-
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('تم حفظ مواعيد العيادات بنجاح ✅'),
-            backgroundColor: Colors.green.shade700,
-          ),
+          const SnackBar(content: Text('تم حفظ مواعيد العيادة بنجاح')),
         );
-
         Navigator.pop(context);
       }
     } catch (e) {
-      _toast('حدث خطأ أثناء الحفظ: $e', error: true);
+      debugPrint('Clinic schedule save error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حفظ المواعيد. حاول مرة أخرى.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  // ==========================
-  // ✅ UI
-  // ==========================
   @override
   Widget build(BuildContext context) {
     final color = widget.primaryColor;
-    final cs = Theme.of(context).colorScheme;
-
     return Scaffold(
+      backgroundColor: const Color(0xFFF6F8F9),
       appBar: AppBar(
         title: Text(
-          _clinicTitle,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          'مواعيد العيادة ${widget.clinicIndex + 1}',
+          style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         backgroundColor: color,
         foregroundColor: Colors.white,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: color.withOpacity(0.25)),
-              ),
-              child: Text(
-                'فعّل الأيام المتاحة ثم اختار الوقت بسهولة (ساعة + دقيقة + ص/م) ✅',
-                style: TextStyle(
-                  color: Colors.grey.shade800,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView.separated(
-                itemCount: _days.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, i) {
-                  final d = _days[i];
-
-                  return Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: d.enabled ? color : Colors.transparent,
-                        width: 1.5,
-                      ),
-                    ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                d.title,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                            Switch(
-                              value: d.enabled,
-                              activeColor: color,
-                              onChanged: (v) {
-                                setState(() {
-                                  d.enabled = v;
-                                  if (!v) {
-                                    d.reset();
-                                  }
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                        if (d.enabled) ...[
-                          const SizedBox(height: 10),
-
-                          // ✅ From / To selectors
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _TimeSelectorCard(
-                                  title: 'من',
-                                  primary: color,
-                                  hour: d.fromHour,
-                                  minute: d.fromMinute,
-                                  period: d.fromPeriod,
-                                  onChanged: (h, m, p) {
-                                    setState(() {
-                                      d.fromHour = h;
-                                      d.fromMinute = m;
-                                      d.fromPeriod = p;
-
-                                      // ✅ لو "إلى" أقل -> نصفرها تلقائيًا
-                                      final from = _toTimeOfDay(d.fromHour,
-                                          d.fromMinute, d.fromPeriod);
-                                      final to = _toTimeOfDay(
-                                          d.toHour, d.toMinute, d.toPeriod);
-
-                                      if (from != null && to != null) {
-                                        if (_toMinutes(to) <=
-                                            _toMinutes(from)) {
-                                          d.toHour = null;
-                                          d.toMinute = null;
-                                          d.toPeriod = null;
-                                        }
-                                      }
-                                    });
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _TimeSelectorCard(
-                                  title: 'إلى',
-                                  primary: color,
-                                  hour: d.toHour,
-                                  minute: d.toMinute,
-                                  period: d.toPeriod,
-                                  onChanged: (h, m, p) {
-                                    setState(() {
-                                      d.toHour = h;
-                                      d.toMinute = m;
-                                      d.toPeriod = p;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
+                        Icon(Icons.cloud_off_rounded,
+                            size: 52, color: Colors.grey.shade500),
+                        const SizedBox(height: 14),
+                        Text(
+                          _loadError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            height: 1.6,
                           ),
-
-                          const SizedBox(height: 10),
-
-                          // ✅ Validation message
-                          Builder(builder: (_) {
-                            final from = _toTimeOfDay(
-                                d.fromHour, d.fromMinute, d.fromPeriod);
-                            final to =
-                                _toTimeOfDay(d.toHour, d.toMinute, d.toPeriod);
-
-                            if (from == null || to == null) {
-                              return Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  'اختر وقت "من" و "إلى"',
-                                  style: TextStyle(
-                                    color: Colors.grey.shade700,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              );
-                            }
-
-                            if (_toMinutes(to) <= _toMinutes(from)) {
-                              return const Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  'لازم وقت "إلى" يكون أكبر من "من"',
-                                  style: TextStyle(
-                                    color: Colors.redAccent,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              );
-                            }
-
-                            return Align(
-                              alignment: Alignment.centerRight,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: cs.primary.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                      color: cs.primary.withOpacity(0.20)),
-                                ),
-                                child: Text(
-                                  '✅ ${_formatTimeArabic(from)} → ${_formatTimeArabic(to)}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    color: cs.primary,
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: _loadSchedule,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('إعادة المحاولة'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: color,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
                       ],
                     ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _saveSchedule,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
                   ),
-                ),
-                child: _saving
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Text(
-                        widget.clinicIndex + 1 < widget.clinicsCount
-                            ? 'حفظ والانتقال للعيادة التالية'
-                            : 'حفظ المواعيد',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
+                )
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(.08),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Text(
+                          'فعّل أيام العمل وحدد بداية ونهاية الدوام. المواعيد المتاحة للمريض تُنشأ كل 30 دقيقة.',
+                          style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
-              ),
-            ),
-          ],
-        ),
-      ),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _days.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final day = _days[i];
+                          final invalid = day.enabled &&
+                              day.from != null &&
+                              day.to != null &&
+                              _minutes(day.to!) <= _minutes(day.from!);
+                          return Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: day.enabled
+                                    ? color.withOpacity(.45)
+                                    : const Color(0xFFE5E7EB),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        day.title,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                    Switch(
+                                      value: day.enabled,
+                                      activeColor: color,
+                                      onChanged: (v) => setState(() {
+                                        day.enabled = v;
+                                        if (!v) {
+                                          day.from = null;
+                                          day.to = null;
+                                        }
+                                      }),
+                                    ),
+                                  ],
+                                ),
+                                if (day.enabled) ...[
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _TimeButton(
+                                          label: 'من',
+                                          value: day.from == null
+                                              ? 'اختر'
+                                              : _format(day.from!),
+                                          color: color,
+                                          onTap: () =>
+                                              _pickTime(day, from: true),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: _TimeButton(
+                                          label: 'إلى',
+                                          value: day.to == null
+                                              ? 'اختر'
+                                              : _format(day.to!),
+                                          color: color,
+                                          onTap: () =>
+                                              _pickTime(day, from: false),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (invalid)
+                                    const Padding(
+                                      padding: EdgeInsets.only(top: 8),
+                                      child: Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          'وقت النهاية يجب أن يكون بعد وقت البداية',
+                                          style: TextStyle(
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _saving ? null : _save,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: _saving
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    widget.clinicIndex + 1 < widget.clinicsCount
+                                        ? 'حفظ والانتقال للعيادة التالية'
+                                        : 'حفظ المواعيد',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
     );
   }
 }
@@ -401,201 +424,48 @@ class _DaySchedule {
   final String title;
   final String key;
   bool enabled = false;
-
-  int? fromHour;
-  int? fromMinute;
-  DayPeriod? fromPeriod;
-
-  int? toHour;
-  int? toMinute;
-  DayPeriod? toPeriod;
+  TimeOfDay? from;
+  TimeOfDay? to;
 
   _DaySchedule(this.title, this.key);
-
-  void reset() {
-    fromHour = null;
-    fromMinute = null;
-    fromPeriod = null;
-    toHour = null;
-    toMinute = null;
-    toPeriod = null;
-  }
 }
 
-class _TimeSelectorCard extends StatelessWidget {
-  final String title;
-  final Color primary;
-
-  final int? hour; // 1..12
-  final int? minute; // 0 / 30
-  final DayPeriod? period; // am / pm
-
-  final void Function(int? hour, int? minute, DayPeriod? period) onChanged;
-
-  const _TimeSelectorCard({
-    required this.title,
-    required this.primary,
-    required this.hour,
-    required this.minute,
-    required this.period,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Icon(Icons.access_time_rounded, color: primary, size: 18),
-              const SizedBox(width: 8),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // ✅ Hour + Minute
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  value: hour,
-                  items: List.generate(12, (i) => i + 1)
-                      .map((h) => DropdownMenuItem(
-                            value: h,
-                            child: Text(h.toString(),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w900)),
-                          ))
-                      .toList(),
-                  onChanged: (v) => onChanged(v, minute, period),
-                  decoration: InputDecoration(
-                    hintText: 'ساعة',
-                    filled: true,
-                    fillColor: cs.surfaceContainerHighest.withOpacity(0.35),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(
-                          color: cs.outlineVariant.withOpacity(0.35)),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  value: minute,
-                  items: const [0, 30]
-                      .map((m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(
-                              m.toString().padLeft(2, '0'),
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w900),
-                            ),
-                          ))
-                      .toList(),
-                  onChanged: (v) => onChanged(hour, v, period),
-                  decoration: InputDecoration(
-                    hintText: 'دقيقة',
-                    filled: true,
-                    fillColor: cs.surfaceContainerHighest.withOpacity(0.35),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(
-                          color: cs.outlineVariant.withOpacity(0.35)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-
-          // ✅ AM / PM Toggle
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withOpacity(0.35),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
-            ),
-            child: Row(
-              children: [
-                _PeriodButton(
-                  title: 'ص',
-                  selected: period == DayPeriod.am,
-                  primary: primary,
-                  onTap: () => onChanged(hour, minute, DayPeriod.am),
-                ),
-                const SizedBox(width: 8),
-                _PeriodButton(
-                  title: 'م',
-                  selected: period == DayPeriod.pm,
-                  primary: primary,
-                  onTap: () => onChanged(hour, minute, DayPeriod.pm),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PeriodButton extends StatelessWidget {
-  final String title;
-  final bool selected;
-  final Color primary;
+class _TimeButton extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
   final VoidCallback onTap;
 
-  const _PeriodButton({
-    required this.title,
-    required this.selected,
-    required this.primary,
+  const _TimeButton({
+    required this.label,
+    required this.value,
+    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: selected ? primary.withOpacity(0.12) : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected
-                  ? primary.withOpacity(0.40)
-                  : cs.outlineVariant.withOpacity(0.35),
-            ),
-          ),
-          child: Center(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: selected ? primary : cs.onSurface.withOpacity(0.75),
-              ),
-            ),
-          ),
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        side: BorderSide(color: color.withOpacity(.35)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
         ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
+        ],
       ),
     );
   }

@@ -1,6 +1,7 @@
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
-const Color kTealDark = Color(0xFF0F766E); // لون الزر
+const Color kTealDark = Color(0xFF0F766E);
 
 class SelectDateTimeScreen extends StatefulWidget {
   final Map<String, dynamic> doctor;
@@ -17,127 +18,242 @@ class SelectDateTimeScreen extends StatefulWidget {
 }
 
 class _SelectDateTimeScreenState extends State<SelectDateTimeScreen> {
+  final DatabaseReference _db = FirebaseDatabase.instance.ref();
+
   DateTime? selectedDate;
   String selectedDay = '';
   String selectedScheduleTime = '';
   String? selectedSlot;
+  bool _loadingBookedSlots = true;
+  final Set<String> _bookedSlots = <String>{};
 
   @override
   void initState() {
     super.initState();
-
     final iso = (widget.doctor['selectedDateIso'] ?? '').toString();
     selectedDay = (widget.doctor['selectedDay'] ?? '').toString();
     selectedScheduleTime = (widget.doctor['selectedTime'] ?? '').toString();
+    if (iso.isNotEmpty) selectedDate = DateTime.tryParse(iso);
+    _loadBookedSlots();
+  }
 
-    if (iso.isNotEmpty) {
-      selectedDate = DateTime.tryParse(iso);
+  String get _doctorId => (widget.doctor['id'] ?? widget.doctor['doctorId'] ?? '')
+      .toString()
+      .trim();
+
+  int get _clinicIndex {
+    final raw = widget.doctor['selectedClinicIndex'] ??
+        widget.doctor['clinicIndex'] ??
+        widget.doctor['selectedClinicId'] ??
+        0;
+    if (raw is int) return raw;
+    return int.tryParse(raw.toString()) ?? 0;
+  }
+
+  String get _dateKey {
+    final date = selectedDate;
+    if (date == null) return '';
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  String _normalizeSlot(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('صباحًا', 'ص')
+        .replaceAll('صباحا', 'ص')
+        .replaceAll('مساءً', 'م')
+        .replaceAll('مساءا', 'م')
+        .replaceAll('am', 'ص')
+        .replaceAll('pm', 'م')
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  bool _blocksSlot(String status) {
+    final value = status.trim().toLowerCase();
+    return value != 'cancelled' &&
+        value != 'canceled' &&
+        value != 'rejected' &&
+        value != 'declined';
+  }
+
+  Future<void> _loadBookedSlots() async {
+    if (_doctorId.isEmpty || _dateKey.isEmpty) {
+      if (mounted) setState(() => _loadingBookedSlots = false);
+      return;
+    }
+
+    try {
+      final snap = await _db
+          .child('dashboardAppointments')
+          .orderByChild('doctorId')
+          .equalTo(_doctorId)
+          .get()
+          .timeout(const Duration(seconds: 8));
+
+      final booked = <String>{};
+      if (snap.exists && snap.value is Map) {
+        final data = Map<dynamic, dynamic>.from(snap.value as Map);
+        for (final value in data.values) {
+          if (value is! Map) continue;
+          final appointment = Map<dynamic, dynamic>.from(value);
+          final date = (appointment['date'] ??
+                  appointment['dateIso'] ??
+                  appointment['selectedDateIso'] ??
+                  appointment['bookingDate'] ??
+                  '')
+              .toString()
+              .trim();
+          if (date != _dateKey) continue;
+
+          final clinicRaw = appointment['clinicIndex'] ??
+              appointment['selectedClinicIndex'] ??
+              0;
+          final clinic = clinicRaw is int
+              ? clinicRaw
+              : int.tryParse(clinicRaw.toString()) ?? 0;
+          if (clinic != _clinicIndex) continue;
+
+          final status = (appointment['status'] ??
+                  appointment['bookingStatus'] ??
+                  'pending')
+              .toString();
+          if (!_blocksSlot(status)) continue;
+
+          final slot = (appointment['time'] ??
+                  appointment['slot'] ??
+                  appointment['selectedSlot'] ??
+                  appointment['timeSlot'] ??
+                  '')
+              .toString();
+          if (slot.trim().isNotEmpty) booked.add(_normalizeSlot(slot));
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _bookedSlots
+          ..clear()
+          ..addAll(booked);
+        if (selectedSlot != null &&
+            _bookedSlots.contains(_normalizeSlot(selectedSlot!))) {
+          selectedSlot = null;
+        }
+        _loadingBookedSlots = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingBookedSlots = false);
     }
   }
 
-  // توليد المواعيد بنظام 12 ساعة + صباحًا / مساءً
   List<String> generateTimeSlots(String rawTime) {
-    if (rawTime.trim().isEmpty) {
-      return ['05:00 صباحًا', '05:30 صباحًا', '06:00 صباحًا'];
-    }
+    final raw = rawTime.trim();
+    if (raw.isEmpty || raw == 'مغلق') return const [];
 
-    final parsed = _parseScheduleTime(rawTime);
-    if (!parsed.hasRange) {
-      return [rawTime];
-    }
+    final parsed = _parseScheduleTime(raw);
+    if (!parsed.hasRange) return const [];
 
     final start = _parseArabicTime(parsed.from!);
     final end = _parseArabicTime(parsed.to!);
+    if (start == null || end == null) return const [];
 
-    if (start == null || end == null) {
-      return [rawTime];
-    }
+    final startMinutes = _minutes(start);
+    final endMinutes = _minutes(end);
+    if (endMinutes <= startMinutes) return const [];
 
     final slots = <String>[];
-    var current = start;
+    var currentMinutes = startMinutes;
 
-    while (_compareTime(current, end) <= 0) {
-      slots.add(_formatTime12Hour(current));
-      current = _addMinutes(current, 30);
+    while (currentMinutes < endMinutes) {
+      final time = TimeOfDay(
+        hour: (currentMinutes ~/ 60) % 24,
+        minute: currentMinutes % 60,
+      );
+      final formatted = _formatTime12Hour(time);
+      if (!_isPastSlot(time) &&
+          !_bookedSlots.contains(_normalizeSlot(formatted))) {
+        slots.add(formatted);
+      }
+      currentMinutes += 30;
     }
 
     return slots;
   }
 
-  TimeOfDay? _parseArabicTime(String s) {
-    var text = s.trim();
+  bool _isPastSlot(TimeOfDay time) {
+    if (selectedDate == null) return false;
+    final now = DateTime.now();
+    final date = selectedDate!;
+    final isToday = date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
+    if (!isToday) return false;
 
-    final isPM = text.contains('م');
-    final isAM = text.contains('ص');
+    final slotDateTime = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    return !slotDateTime.isAfter(now);
+  }
 
+  int _minutes(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  TimeOfDay? _parseArabicTime(String input) {
+    var text = input
+        .trim()
+        .replaceAll('صباحًا', 'ص')
+        .replaceAll('صباحا', 'ص')
+        .replaceAll('مساءً', 'م')
+        .replaceAll('مساءا', 'م')
+        .replaceAll('AM', 'ص')
+        .replaceAll('PM', 'م')
+        .replaceAll('am', 'ص')
+        .replaceAll('pm', 'م');
+
+    final isPm = text.contains('م');
+    final isAm = text.contains('ص');
     text = text.replaceAll('م', '').replaceAll('ص', '').trim();
 
-    int hour = 0;
-    int minute = 0;
+    final parts = text.split(':');
+    final hour = int.tryParse(parts.first.trim());
+    final minute = parts.length > 1 ? int.tryParse(parts[1].trim()) : 0;
+    if (hour == null || minute == null) return null;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
 
-    if (text.contains(':')) {
-      final parts = text.split(':');
-      hour = int.tryParse(parts[0].trim()) ?? 0;
-      minute = int.tryParse(parts[1].trim()) ?? 0;
-    } else {
-      hour = int.tryParse(text) ?? 0;
-      minute = 0;
-    }
-
-    // تحويل إلى نظام 24 ساعة داخليًا
-    if (isPM && hour < 12) hour += 12;
-    if (isAM && hour == 12) hour = 0;
-
-    return TimeOfDay(hour: hour, minute: minute);
+    var h = hour;
+    if (isPm && h < 12) h += 12;
+    if (isAm && h == 12) h = 0;
+    return TimeOfDay(hour: h, minute: minute);
   }
 
-  TimeOfDay _addMinutes(TimeOfDay t, int minutes) {
-    final total = t.hour * 60 + t.minute + minutes;
-    final h = (total ~/ 60) % 24;
-    final m = total % 60;
-    return TimeOfDay(hour: h, minute: m);
-  }
-
-  int _compareTime(TimeOfDay a, TimeOfDay b) {
-    final aa = a.hour * 60 + a.minute;
-    final bb = b.hour * 60 + b.minute;
-    return aa.compareTo(bb);
-  }
-
-  // تنسيق الوقت بنظام 12 ساعة + صباحًا / مساءً
   String _formatTime12Hour(TimeOfDay t) {
-    int hour = t.hour;
-    final minute = t.minute.toString().padLeft(2, '0');
-    String period = 'صباحًا';
-
-    if (hour >= 12) {
-      period = 'مساءً';
-      if (hour > 12) hour -= 12;
-    }
+    var hour = t.hour;
+    final period = hour >= 12 ? 'مساءً' : 'صباحًا';
+    if (hour > 12) hour -= 12;
     if (hour == 0) hour = 12;
-
-    return '${hour.toString().padLeft(2, '0')}:$minute $period';
+    return '${hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')} $period';
   }
 
   _ParsedTimeRange _parseScheduleTime(String raw) {
     final s = raw.trim();
-    if (s.isEmpty) return _ParsedTimeRange(raw: raw);
-
-    final reg = RegExp(r'(\d{1,2}(?::\d{2})?\s*(?:ص|م)?)');
-    final matches = reg.allMatches(s).map((m) => m.group(1)!.trim()).toList();
-
+    final reg = RegExp(
+      r'(\d{1,2}(?::\d{1,2})?\s*(?:صباحًا|صباحا|مساءً|مساءا|ص|م|AM|PM|am|pm)?)',
+    );
+    final matches = reg
+        .allMatches(s)
+        .map((m) => m.group(1)?.trim() ?? '')
+        .where((e) => e.isNotEmpty)
+        .toList();
     if (matches.length >= 2) {
       return _ParsedTimeRange(raw: raw, from: matches[0], to: matches[1]);
     }
-
-    if (s.contains('-')) {
-      final parts =
-          s.split('-').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-      if (parts.length >= 2) {
-        return _ParsedTimeRange(raw: raw, from: parts[0], to: parts[1]);
-      }
-    }
-
     return _ParsedTimeRange(raw: raw);
   }
 
@@ -148,10 +264,7 @@ class _SelectDateTimeScreenState extends State<SelectDateTimeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7FB),
       appBar: AppBar(
-        title: const Text(
-          'اختيار الوقت',
-          style: TextStyle(fontWeight: FontWeight.w900),
-        ),
+        title: const Text('اختيار الوقت', style: TextStyle(fontWeight: FontWeight.w900)),
         backgroundColor: Colors.white,
         foregroundColor: kTealDark,
         elevation: 0,
@@ -160,7 +273,6 @@ class _SelectDateTimeScreenState extends State<SelectDateTimeScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Info Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(14),
@@ -172,109 +284,79 @@ class _SelectDateTimeScreenState extends State<SelectDateTimeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'اليوم المختار: $selectedDay',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
-                    ),
-                  ),
+                  Text('اليوم المختار: $selectedDay', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
                   const SizedBox(height: 6),
-                  Text(
-                    selectedDate == null
-                        ? ''
-                        : 'التاريخ: ${selectedDate!.year}/${selectedDate!.month}/${selectedDate!.day}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey.shade700,
+                  if (selectedDate != null)
+                    Text(
+                      'التاريخ: ${selectedDate!.year}/${selectedDate!.month}/${selectedDate!.day}',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade700),
                     ),
-                  ),
                 ],
               ),
             ),
-
             const SizedBox(height: 14),
-
-            // Slots
             Expanded(
-              child: ListView.builder(
-                itemCount: slots.length,
-                itemBuilder: (context, i) {
-                  final t = slots[i];
-                  final selected = selectedSlot == t;
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () => setState(() => selectedSlot = t),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? kTealDark.withOpacity(0.12)
-                              : Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: selected
-                                ? kTealDark.withOpacity(0.60)
-                                : Colors.grey.shade300,
+              child: _loadingBookedSlots
+                  ? const Center(child: CircularProgressIndicator(color: kTealDark))
+                  : slots.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.event_busy_rounded, size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 12),
+                              const Text('لا توجد مواعيد متاحة في هذا اليوم', style: TextStyle(fontWeight: FontWeight.w900)),
+                              const SizedBox(height: 5),
+                              Text('قد تكون المواعيد محجوزة أو انتهت مواعيد اليوم.', style: TextStyle(color: Colors.grey.shade600)),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _loadBookedSlots,
+                          child: ListView.separated(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount: slots.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                            itemBuilder: (context, i) {
+                              final time = slots[i];
+                              final selected = selectedSlot == time;
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => setState(() => selectedSlot = time),
+                                child: Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: selected ? kTealDark.withOpacity(0.12) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: selected ? kTealDark.withOpacity(0.60) : Colors.grey.shade300),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.access_time_rounded, color: selected ? kTealDark : Colors.grey.shade600),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: Text(time, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: selected ? kTealDark : Colors.black87))),
+                                      if (selected) const Icon(Icons.check_circle_rounded, color: kTealDark),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.access_time_rounded,
-                              color:
-                                  selected ? kTealDark : Colors.grey.shade600,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                t,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 14,
-                                  color: selected ? kTealDark : Colors.black87,
-                                ),
-                              ),
-                            ),
-                            if (selected)
-                              const Icon(Icons.check_circle_rounded,
-                                  color: kTealDark),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
             ),
-
-            // Confirm Button - Teal Dark
             SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: selectedSlot == null
+                onPressed: selectedSlot == null || _loadingBookedSlots
                     ? null
-                    : () {
-                        Navigator.pop(context, selectedSlot);
-                      },
+                    : () => Navigator.pop(context, selectedSlot),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kTealDark,
                   disabledBackgroundColor: Colors.grey.shade300,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: const Text(
-                  'تأكيد الوقت',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                  ),
-                ),
+                child: const Text('تأكيد الوقت', style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
               ),
             ),
           ],
@@ -292,6 +374,5 @@ class _ParsedTimeRange {
   const _ParsedTimeRange({required this.raw, this.from, this.to});
 
   bool get hasRange =>
-      (from != null && from!.trim().isNotEmpty) &&
-      (to != null && to!.trim().isNotEmpty);
+      from != null && from!.trim().isNotEmpty && to != null && to!.trim().isNotEmpty;
 }
