@@ -1,0 +1,106 @@
+{
+  "project_info": {
+    "project_number": "181292718652",
+    "firebase_url": "https://sulmtak-default-rtdb.firebaseio.com",
+    "project_id": "sulmtak",
+    "storage_bucket": "sulmtak.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181292718652:android:4391da0d30e02b3d8b0139",
+        "android_client_info": {
+          "package_name": "com.app.salmtak_doctor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADmYW51_bD-Wg-nvg8xWT5LGETUL3rouo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181292718652:android:b89d56e9456561188b0139",
+        "android_client_info": {
+          "package_name": "com.example.salmtak_doctor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADmYW51_bD-Wg-nvg8xWT5LGETUL3rouo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181292718652:android:a8c676af584d44128b0139",
+        "android_client_info": {
+          "package_name": "com.example.sulmtak_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADmYW51_bD-Wg-nvg8xWT5LGETUL3rouo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181292718652:android:d2c5fddaa05ce8998b0139",
+        "android_client_info": {
+          "package_name": "com.salamtak.newapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADmYW51_bD-Wg-nvg8xWT5LGETUL3rouo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181292718652:android:230d5df3974950ba8b0139",
+        "android_client_info": {
+          "package_name": "com.salmtak_app.app.salmtak"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADmYW51_bD-Wg-nvg8xWT5LGETUL3rouo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
